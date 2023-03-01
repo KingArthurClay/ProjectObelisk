@@ -18,7 +18,7 @@ public class Shotgun : Weapon
         lastFired = 0;
     }
 
-    public override void Fire1(bool useAmmo = false)
+    public override void Fire1Start(bool useAmmo = false)
     {
         if ( Time.unscaledTime - lastFired < coolDownTime || fired == true ) { return; }    
         if (useAmmo) {
@@ -37,11 +37,7 @@ public class Shotgun : Weapon
 
             Bullet b = bullets[i].GetComponent<Bullet>();
 
-            b.damageInfo = new DamageInfo()
-            {
-                damage = _damage,
-                attacker = _holder
-            };
+            b.damageInfo = CreateDamageInfo();
 
             bullets[i].GetComponent<Rigidbody>().velocity = bullets[i].transform.forward * bulletSpeed;
 

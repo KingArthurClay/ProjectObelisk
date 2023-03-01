@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.Events;
 
 public enum WeaponType { Gun, Melee }
-public enum AmmoType { Rifle, Pistol, Energy, Shotgun, NONE }
+public enum AmmoType { Explosive, Pistol, Energy, Shotgun, NONE }
 
 #region Event Args
 public class OnWeaponAmmoChangedArgs : EventArgs {
@@ -27,13 +27,12 @@ public abstract class Weapon : MonoBehaviour
 
     [Header("Weapon Info")]
     [SerializeField] private WeaponItem _weaponItem; public WeaponItem WeaponItem { get => _weaponItem; }
+    [SerializeField] private List<MeshCollider> _colliders; public List<MeshCollider> Colliders{get => _colliders;}
     // The damage an attack does
     [SerializeField] protected float _damage;
     [SerializeField] protected WeaponType _weaponType;
 
     [Header("Ammo Costs/Types")]
-    // [SerializeField] protected int _ammoCost1; public int AmmoCost1 { get => _ammoCost1; }
-    // [SerializeField] protected AmmoType _ammoType1; public AmmoType AmmoType1 { get => _ammoType1; }
     [SerializeField] protected int _ammoAmount1; public int AmmoAmount1 { 
         get => _ammoAmount1;
         protected set {
@@ -43,11 +42,13 @@ public abstract class Weapon : MonoBehaviour
             new OnWeaponAmmoChangedArgs(oldAmount, _ammoAmount1));
         } 
     }
-    // [SerializeField] protected int _ammoCost2; public int AmmoCost2 { get => _ammoCost2; }
-    // [SerializeField] protected AmmoType _ammoType2; public AmmoType AmmoType2 { get => _ammoType2; }
-    [SerializeField] protected int _ammoAmount2; public int AmmoAmount2 { get => _ammoAmount2; }
 
     protected GameObject _holder = null; public GameObject Holder { get => _holder; }
+
+    private bool _canPlace = true; public bool CanPlace {get => _canPlace; 
+    set {
+        _canPlace = value;
+    }}
 
     #region Events
     public delegate void OnWeaponAmmoChangedHandler(object sender, EventArgs e);
@@ -57,10 +58,11 @@ public abstract class Weapon : MonoBehaviour
     public void InitializeWeapon(int ammoAmount1, int ammoAmount2) {
         _holder = null;
         transform.parent = null;
-        transform.GetComponent<BoxCollider>().enabled = true;
+        foreach (MeshCollider collider in _colliders) {
+            collider.enabled = true;
+        }
         transform.GetComponent<Rigidbody>().isKinematic = false;
         _ammoAmount1 = ammoAmount1;
-        _ammoAmount2 = ammoAmount2;
     }
 
     /// <summary>
@@ -74,7 +76,10 @@ public abstract class Weapon : MonoBehaviour
         transform.parent = equipPos;
         transform.localPosition = Vector3.zero;
         transform.localRotation = Quaternion.Euler(_holder.transform.forward);
-        transform.GetComponent<BoxCollider>().enabled = false;
+        foreach (MeshCollider collider in _colliders) {
+            collider.enabled = false;
+        }
+        //transform.GetComponent<BoxCollider>().enabled = false;
         transform.GetComponent<Rigidbody>().isKinematic = true;
     }
 
@@ -85,18 +90,33 @@ public abstract class Weapon : MonoBehaviour
     {
         _holder = null;
         transform.parent = null;
-        transform.GetComponent<BoxCollider>().enabled = true;
-        transform.GetComponent<Rigidbody>().isKinematic = false;
-    }
 
+        foreach (MeshCollider collider in _colliders) {
+            collider.enabled = true;
+        }
+
+        //transform.GetComponent<BoxCollider>().enabled = true;
+        transform.GetComponent<Rigidbody>().isKinematic = false;
+        if (AmmoAmount1 == 0) {
+            Destroy(gameObject);
+        }
+    }
 
     // Use ammo defaults to false because player is the only
     // case where ammo is going to be used
-    public virtual void Fire1(bool useAmmo = false) { }
+    public virtual void Fire1Start(bool useAmmo = false) { }
     public virtual void Fire1Stop(bool useAmmo = false) { }
+    public virtual void Fire1Held(bool useAmmo = false) { }
 
     public virtual void Fire2(bool useAmmo = false) { }
     public virtual void Fire2Stop(bool useAmmo = false) { }
 
+    protected DamageInfo CreateDamageInfo() {
+        return new DamageInfo {
+            damage = _damage,
+            attacker = _holder,
+            ammoType = _weaponItem.AmmoType1
+        };
+    }
 }
 

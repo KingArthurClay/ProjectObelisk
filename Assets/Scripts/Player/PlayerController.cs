@@ -28,7 +28,8 @@ public class PlayerController : MonoBehaviour
     private Vector3 _groundMousePt;
 
     // The object that should follow the mouse pointer
-    private GameObject _followObject;
+    private Weapon _followWeapon;
+    private string _currentActionMap;
 
     [Header("EXPOSED FOR DEBUG")]
     [SerializeField]private List<Weapon> _placedWeapons;
@@ -43,7 +44,7 @@ public class PlayerController : MonoBehaviour
         _healthHandler.MaxHealth = PlayerState.MaxHealth;
         _healthHandler.Health = PlayerState.Health;
 
-        _followObject = null;
+        _followWeapon = null;
         _rolling = false;
         _lastRolled = -1;
         _placedWeapons = new List<Weapon>();
@@ -51,23 +52,26 @@ public class PlayerController : MonoBehaviour
         PlayerState.Position = transform.position;
         PlayerState.OnPlayerStateRevert += RevertPlayer;
         GameManager.OnGameStateChanged += OnGameStateChange;
+        GameManager.OnGamePauseChange += OnGamePauseChange;
     }
 
     private void OnDisable() {
         PlayerState.OnPlayerStateRevert -= RevertPlayer;
         GameManager.OnGameStateChanged -= OnGameStateChange;
+        GameManager.OnGamePauseChange -= OnGamePauseChange;
     }
-
+    
     void Update()
     {
+        if (GameManager.Paused) return;
         if (GameManager.CurrentState != GameState.Plan)
         {
             transform.LookAt(_lookPt);
             if (!_rolling) _rb.velocity = _velocity;
         } 
-        if (_followObject != null) {
+        if (_followWeapon != null) {
             var gotoPt = new Vector3(_lookPt.x, _lookPt.y + 5, _lookPt.z);
-            _followObject.transform.position = _lookPt;
+            _followWeapon.transform.position = _lookPt;
         }
     }
 
@@ -97,12 +101,16 @@ public class PlayerController : MonoBehaviour
         switch (e.NewState) {
             case GameState.Combat:
                 _input.SwitchCurrentActionMap("Combat");
+                _rb.isKinematic = false;
                 break;
             case GameState.Plan:
                 _input.SwitchCurrentActionMap("Planning");
+                _rb.velocity = Vector3.zero;
+                _rb.isKinematic = true;
                 break;
             case GameState.PostCombat:
                 _input.SwitchCurrentActionMap("Combat");
+                _rb.isKinematic = false;
                 if (e.TriggeredByRevert) break;
                 if (_equippedWeapon != null) 
                 {
@@ -118,13 +126,23 @@ public class PlayerController : MonoBehaviour
                     while (_placedWeapons.Count != 0) {
                         Weapon currWeapon = _placedWeapons[0];
                         _placedWeapons.Remove(currWeapon);
-                        PlayerState.AddToAmmo(currWeapon.WeaponItem.AmmoType1, currWeapon.AmmoAmount2);
+                        PlayerState.AddToAmmo(currWeapon.WeaponItem.AmmoType1, currWeapon.AmmoAmount1);
                         Destroy(currWeapon.gameObject);
                     }
                 }
                 _placedWeapons = new List<Weapon>();
                 break;
         }
+    }
+
+    private void OnGamePauseChange (object sender, OnGamePauseChangeArgs e) {
+        if (GameManager.Paused) {
+            _currentActionMap = _input.currentActionMap.name;
+            _input.SwitchCurrentActionMap("Pause");
+        } else {
+            _input.SwitchCurrentActionMap(_currentActionMap);
+        }
+
     }
 
     public void CancelPlanState(CallbackContext callback) {
@@ -190,6 +208,12 @@ public class PlayerController : MonoBehaviour
         StartCoroutine(RollSequence());
     }
 
+    public void Drop(CallbackContext context) {
+        if (!context.started) return;
+        if (_equippedWeapon != null) {
+            _equippedWeapon.DropWeapon();
+        }
+    }
     private IEnumerator RollSequence() {
         _lastRolled = Time.fixedTime;
         _rolling = true;
@@ -216,20 +240,36 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _interactableRadius;
     [SerializeField] private LayerMask _interactableMask;
     private Weapon _equippedWeapon; public Weapon EquippedWeapon {get => _equippedWeapon;}
-    
 
+    [Header("Attack Properties")]
+    [SerializeField] private Transform _attackPoint;
+    [SerializeField] private float _attackRange;
+    [SerializeField] private LayerMask _attackMask;
+    [SerializeField] private float _damage;
+    public AmmoDictionary Ammo {get => PlayerState.Ammo; }
+
+    
     public void Fire1(CallbackContext context)
     {
-        if (_equippedWeapon == null) return;
-        if (context.started)
+      
+        if (_equippedWeapon == null)  {
+            Melee(context);
+            return;
+        }
+        if (context.started) {
+            Debug.Log("started");
+            _equippedWeapon.Fire1Start(true);
+        }
+        else if (context.canceled)
         {
-            _equippedWeapon.Fire1(true);
-        } else if (context.canceled)
-        {
+            Debug.Log("cancelled");
             _equippedWeapon.Fire1Stop(true);
+            
+        } else if (context.performed) {
+            Debug.Log("held");
+            _equippedWeapon.Fire1Held(true);
         }
     }
-
     public void Fire2(CallbackContext context)
     {
         if (_equippedWeapon == null) return;
@@ -243,44 +283,62 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    //To visualize the hitbox for melee attack
+    public void OnDrawGizmos() {
+        if (_attackPoint is null) {
+            return;
+        }
+
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(_attackPoint.position, _attackRange);
+    }
+
+    public void Melee(CallbackContext context) {
+        if (!context.started) return;
+        DamageInfo damageInfo = new DamageInfo() {
+            damage = _damage,
+            attacker = gameObject
+        };
+
+        Debug.Log("melee");
+
+        Collider[] colliders = Physics.OverlapSphere(_attackPoint.position, _attackRange, _attackMask);
+        foreach(Collider collider in colliders) {
+            Transform hitTransform = collider.transform.root;
+            HealthHandler hitHealth = hitTransform.GetComponent<HealthHandler>();
+            Debug.Log(hitHealth != null);
+            if (hitHealth != null) {
+                hitHealth.Damage(damageInfo);
+            }
+        }
+    }
+
     public void Interact(CallbackContext context)
     {
         // make sure that this is only called once
         if (!context.started) return;
+
+        List<Weapon> weaponsPointedAt = GetWeaponsPointedAt();
+        List<Weapon> weaponsAround = GetWeaponsAround();
+
+        if (weaponsPointedAt.Count != 0) {
+            if ((Vector3.Distance(_groundMousePt, transform.position) < _maxPickUpDistance)) {
+                InteractWithWeapons(weaponsPointedAt);
+            }
+        }
+
+        if (weaponsAround.Count != 0) {
+            InteractWithWeapons(weaponsAround);
+        }
+
         // returns if the position the mouse is over is too far to interact
         if (!(Vector3.Distance(_groundMousePt, transform.position) < _maxPickUpDistance)) return;
 
+        // If no weapons found, then search for interactables
         Collider[] colliders = Physics.OverlapSphere(_groundMousePt, _interactableRadius);
-
-        // prioritizes weapons over interactables
         Interactable interactable = null;
         foreach(Collider collider in colliders)
         {
-            if (collider.gameObject.layer == LayerMask.NameToLayer("Weapon"))
-            {
-                Weapon wep = collider.transform.GetComponent<Weapon>();
-        
-                // Skip over weapons that already have an owner
-                if (wep.Holder != null) { continue; }
-
-                // If in the postCombat stage, then just add it to the weapons
-                if (GameManager.CurrentState == GameState.PostCombat) {
-                    // Add the amount of ammo the weapon had into the ammo dictionary
-                    PlayerState.AddToAmmo(wep.WeaponItem.AmmoType1, wep.AmmoAmount1);
-                    PlayerState.AddWeapon(wep.WeaponItem);
-                    Destroy(wep.gameObject);
-                    return;
-                }
-
-                if (_equippedWeapon != null)
-                {
-                    _equippedWeapon.DropWeapon();
-                }
-                wep.PickUpWeapon(gameObject, _weaponPos);
-                _equippedWeapon = wep;
-                PlayerState.CurrentWeapon = wep;
-                return;
-            }
             if (collider.gameObject.layer == LayerMask.NameToLayer("Interactable"))
             {
                 interactable = collider.transform.GetComponent<Interactable>();
@@ -291,6 +349,10 @@ public class PlayerController : MonoBehaviour
     #endregion
 
     # region Inventory
+
+    public void RewardAmmo(AmmoType type, int amount) {
+        PlayerState.AddToAmmo(type, amount);
+    }
 
     /// <summary>
     /// Spawns a weapon into the world
@@ -303,25 +365,32 @@ public class PlayerController : MonoBehaviour
             graphicCaster.Raycast(new PointerEventData(EventSystem.current) {
                 position = Mouse.current.position.ReadValue()
             }, clickResults);
-            if (clickResults.Count == 0) return;
-            InventorySlot chosenSlot = null;
-            foreach(var result in clickResults) {
-                chosenSlot = result.gameObject.GetComponent<InventorySlot>();
-                if (chosenSlot != null) break;
+
+            if (clickResults.Count != 0) {
+                InventorySlot chosenSlot = null;
+                foreach(var result in clickResults) {
+                    chosenSlot = result.gameObject.GetComponent<InventorySlot>();
+                    if (chosenSlot != null) break;
+                }
+                if (chosenSlot == null) return;
+                var item = chosenSlot.Weapon;
+
+                if (PlayerState.Ammo[item.AmmoType1] < item.AmmoCost1) return;
+
+                GameObject Instance = Instantiate(item.gameObject);
+                _followWeapon = Instance.GetComponent<Weapon>();
+                _placedWeapons.Add(_followWeapon);
+                PlayerState.AddToAmmo(item.AmmoType1, -item.AmmoCost1);
+                _followWeapon.InitializeWeapon(item.AmmoCost1, item.AmmoCost2);
+            } else {
+                List<Weapon> weaponsPointedAt = GetWeaponsPointedAt();
+                if (weaponsPointedAt.Count != 0) {
+                    _followWeapon = weaponsPointedAt[0];
+                }
             }
-            if (chosenSlot == null) return;
-            var item = chosenSlot.Weapon;
-
-            if (PlayerState.Ammo[item.AmmoType1] < item.AmmoCost1) return;
-
-            GameObject Instance = Instantiate(item.gameObject);
-            Weapon weapon = Instance.GetComponent<Weapon>();
-            _placedWeapons.Add(weapon);
-            PlayerState.AddToAmmo(item.AmmoType1, -item.AmmoCost1);
-            weapon.InitializeWeapon(item.AmmoCost1, item.AmmoCost2);
-            _followObject = Instance;
         } else if (context.canceled) {
-            _followObject = null;
+            if (_followWeapon != null && !_followWeapon.CanPlace) WeaponPlanRemove(_followWeapon);
+            _followWeapon = null;
         }
     }
 
@@ -331,32 +400,96 @@ public class PlayerController : MonoBehaviour
     /// <param name="context"></param>
     public void RemoveFromWorld(CallbackContext context) {
         if (!context.started) return;
-
-        Collider[] colliders = Physics.OverlapSphere(_groundMousePt, _interactableRadius);
-
-        foreach (Collider collider in colliders) {
-            if (collider.gameObject.layer == LayerMask.NameToLayer("Weapon")) {
-                Weapon wepToRemove = collider.transform.GetComponent<Weapon>();
-
-                if (GameManager.CurrentState == GameState.Plan) {
-                    // checking if the weapon is actually in the list, and then removing it
-                    if (_placedWeapons.Contains(wepToRemove)) {
-                        _placedWeapons.Remove(wepToRemove);
-                    } else { return; }
-
-                    // Adding the weapon back to player inventory
-                    PlayerState.AddToAmmo(wepToRemove.WeaponItem.AmmoType1, wepToRemove.AmmoAmount1);
-                    PlayerState.AddWeapon(wepToRemove.WeaponItem);
-
-                    Destroy(wepToRemove.gameObject);
-                    return;
-                }
+        List<Weapon> wepsPointedAt = GetWeaponsPointedAt();
+        foreach (Weapon weapon in wepsPointedAt) {
+            if (_placedWeapons.Contains(weapon)) {
+                _placedWeapons.Remove(weapon);
+                PlayerState.AddToAmmo(weapon.WeaponItem.AmmoType1,
+                weapon.AmmoAmount1);
+                Destroy(weapon.gameObject);
             }
         }
     }
+
+    /// <summary>
+    /// Helper method that correctly removes a weapon from the world that the player placed during the plan stage
+    /// </summary>
+    /// <param name="context"></param>
+    private void WeaponPlanRemove(Weapon weapon) {
+        if (_placedWeapons.Contains(weapon)) {
+            _placedWeapons.Remove(weapon);
+        } else return;
+        PlayerState.AddToAmmo(weapon.WeaponItem.AmmoType1, weapon.AmmoAmount1);
+        PlayerState.AddWeapon(weapon.WeaponItem);
+        Destroy(weapon.gameObject);
+    }
+
+    /// <summary>
+    /// Helper method that gets a list of weapons that the player's cursor is over
+    /// </summary>
+    /// <returns>The list of weapons</returnsZ>
+    private List<Weapon> GetWeaponsPointedAt() {
+        Collider[] colliders = Physics.OverlapSphere(_groundMousePt, _interactableRadius);
+        List<Weapon> weapons = new List<Weapon>();
+
+        foreach (Collider collider in colliders) {
+            if (collider.gameObject.layer == LayerMask.NameToLayer("Weapon")) {
+                weapons.Add(collider.transform.root.GetComponent<Weapon>());
+            }
+        }
+        return weapons;
+    }
+
+    /// <summary>
+    /// Helper method that gets a list of weapons that the player is around
+    /// </summary>
+    /// <returns>The list of weapons</returnsZ>
+    private List<Weapon> GetWeaponsAround() {
+        Collider[] colliders = Physics.OverlapSphere(transform.position, _interactableRadius);
+        List<Weapon> weapons = new List<Weapon>();
+
+        foreach (Collider collider in colliders) {
+            if (collider.gameObject.layer == LayerMask.NameToLayer("Weapon")) {
+                weapons.Add(collider.transform.root.GetComponent<Weapon>());
+            }
+        }
+        return weapons;
+    }
+
+    /// <summary>
+    /// Helper method to interact with the weapons pointed at or nearby.
+    /// </summary>
+    /// <param name="weaponsList"></param>
+    private void InteractWithWeapons(List<Weapon> weaponsList) {
+        foreach (Weapon wep in weaponsList) {
+            if (wep.Holder != null) { continue; }
+
+            // If in the postCombat stage, then just add it to the weapons
+            if (GameManager.CurrentState == GameState.PostCombat) {
+                // Add the amount of ammo the weapon had into the ammo dictionary
+                PlayerState.AddToAmmo(wep.WeaponItem.AmmoType1, wep.AmmoAmount1);
+                PlayerState.AddWeapon(wep.WeaponItem);
+                Destroy(wep.gameObject);
+                return;
+            }
+
+            if (_equippedWeapon != null)
+            {
+                _equippedWeapon.DropWeapon();
+            }
+            wep.PickUpWeapon(gameObject, _weaponPos);
+            _equippedWeapon = wep;
+            PlayerState.CurrentWeapon = wep;
+            return;
+        }
+        
+    }
     #endregion
 
-    public void Quit(CallbackContext context) {
-        if (context.started) Application.Quit();
+    public void Pause(CallbackContext context) {
+        //if (context.started) Application.Quit();
+        if (!context.started) return;
+        if (GameManager.Paused) GameManager.UnPause();
+        else GameManager.Pause();
     }
 }

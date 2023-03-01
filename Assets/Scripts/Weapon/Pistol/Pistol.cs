@@ -21,7 +21,7 @@ public class Pistol : Weapon
         lastFired = 0;
     }
 
-    public override void Fire1(bool useAmmo = false)
+    public override void Fire1Start(bool useAmmo = false)
     {
         if (Time.unscaledTime - lastFired < coolDownTime  || fired == true) { return; }
         if (useAmmo) {
@@ -34,11 +34,7 @@ public class Pistol : Weapon
         // Fire the weapon
         GameObject bulletInstance = Instantiate(bullet, _attackPoint.position, _holder.transform.rotation);
         Bullet b = bulletInstance.GetComponent<Bullet>();
-        b.damageInfo = new DamageInfo()
-        {
-            damage = _damage,
-            attacker = _holder
-        };
+        b.damageInfo = CreateDamageInfo();
         bulletInstance.GetComponent<Rigidbody>().velocity = bulletInstance.transform.forward * bulletSpeed;
     }
 
