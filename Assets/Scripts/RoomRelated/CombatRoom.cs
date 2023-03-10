@@ -14,7 +14,8 @@ public class CombatRoom : Room
 
     public event EventHandler OnCombatStart;
 
-    [SerializeField] private TransformGameObjectDictionary _enemySpawnPoints;
+    //[SerializeField] private TransformGameObjectDictionary _enemySpawnPoints;
+    [SerializeField] private templateRoomEnemyData _data;
     [SerializeField] private NavMeshData _navMesh;
     [SerializeField] private GameObject _boundaryColliders;
     [SerializeField] private RoomReward _rewardObject;
@@ -33,7 +34,7 @@ public class CombatRoom : Room
         _aliveEnemies = new List<EnemyController>();
         _droppedWeapons = new List<Weapon>();
         _boundaryColliders.SetActive(false);
-        _roomCompleted = false;
+        _roomCompleted = false; 
         _player = null;
         _planning = false;
         _rewardObject.RoomName = gameObject.name;
@@ -133,9 +134,11 @@ public class CombatRoom : Room
     }
 
     private void InitializeEnemies() {
-        foreach (Transform enemyTransform in _enemySpawnPoints.Keys)
+        //foreach (Transform enemyTransform in _enemySpawnPoints.Keys)
+        foreach (Transform enemyTransform in _data.enemySpawnPoints.Keys)
         {
-            GameObject enemyInstance = Instantiate(_enemySpawnPoints[enemyTransform],
+            //GameObject enemyInstance = Instantiate(_enemySpawnPoints[enemyTransform],
+            GameObject enemyInstance = Instantiate(_data.enemySpawnPoints[enemyTransform],
             enemyTransform.position, Quaternion.identity);
             EnemyController enemyControllerInstance = enemyInstance.GetComponent<EnemyController>(); 
             enemyControllerInstance.onEnemyDeath.AddListener(OnEnemyDeath);
