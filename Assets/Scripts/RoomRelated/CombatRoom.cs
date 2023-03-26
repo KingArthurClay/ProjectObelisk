@@ -14,7 +14,7 @@ public class CombatRoom : Room
 
     public event EventHandler OnCombatStart;
 
-    //[SerializeField] private TransformGameObjectDictionary _enemySpawnPoints;
+    private TransformGameObjectDictionary _enemySpawnPoints;
     [SerializeField] private templateRoomEnemyData _data;
     [SerializeField] private NavMeshData _navMesh;
     [SerializeField] private GameObject _boundaryColliders;
